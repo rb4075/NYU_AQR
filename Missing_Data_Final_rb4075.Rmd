@@ -1,0 +1,477 @@
+---
+title: "Final Project: Missing Data"
+author: "roberta barnett"
+date: "3/15/2019"
+output: html_document
+---
+
+library(mi)
+library(mice)
+library(imputeTS)
+library (VIM)
+
+df <- read.csv("~/hvs_missingdata")
+df$X <-NULL
+
+summary(df)
+
+summary(complete.cases(df))
+
+```{r}
+#og data 
+summary(df_full)
+reg <- lm(Moved ~ Monthly.contract.rent + Income + Householder.s.Age.Recode + White, data=df_full)
+summary(reg)
+
+```
+
+```{r}
+summary(df)
+```
+
+summary(dfcc)
+```{r}
+#listwise
+#8902 cc
+dfcc=df
+dfcc <- dfcc[complete.cases(df),]
+
+reg1 <- lm(Moved ~ Monthly.contract.rent + Income + Householder.s.Age.Recode + White, data=dfcc)
+summary(reg1)
+
+```
+
+
+```{r}
+#mean/mode 
+
+#subset numerical and categorical
+df_num <- df[c(1,2,5)]
+
+df_bi <- df[c(3,4)]
+
+df_num <- na.mean(df_num, option = "mean")
+
+summary(df_num)
+
+df_bi <- na.mean(df_bi, option = "mode")
+
+summary(df_bi)
+
+df_mean <- merge(df_num,df_bi, by=0)
+
+summary(df_mean)
+
+reg2 <- lm(Moved ~ Monthly.contract.rent + Income + Householder.s.Age.Recode + White, data=df_mean)
+summary(reg2)
+
+```
+summary(df_mean)
+```{r}
+hist(df$Householder.s.Age.Recode)
+histogram(df_mean$Householder.s.Age.Recode)
+
+hist(df$Monthly.contract.rent)
+histogram(df_mean$Monthly.contract.rent)
+
+hist(df$Moved)
+histogram(df_mean$Moved)
+
+hist(df$White)
+histogram(df_mean$White)
+```
+
+
+summary(df_rand)
+```{r}
+#random
+#using professor-written function from class
+
+rand_age <-random.imp(df$Householder.s.Age.Recode)
+
+rand_rent <- random.imp (df$Monthly.contract.rent)
+
+rand_move <- random.imp (df$Moved)
+
+rand_white <- random.imp (df$White)
+
+
+df_rand <- cbind(rand_age, rand_rent, rand_move, rand_white, df$Income)
+summary(df_rand)
+
+df_rand <- as.data.frame(df_rand)
+names(df_rand)[5]<-"income"
+
+reg3 <- lm(rand_move ~ rand_rent + income + rand_age + rand_white, data=df_rand)
+summary(reg3)
+
+
+```
+
+```{r}
+hist(df$Householder.s.Age.Recode)
+histogram(df_rand$rand_age)
+
+hist(df$Monthly.contract.rent)
+histogram(df_rand$rand_rent)
+
+hist(df$Moved)
+histogram(df_rand$rand_move)
+
+hist(df$White)
+histogram(df_rand$rand_white)
+```
+
+
+
+```{r}
+#dummy var
+# Dummy variable imputation method
+df1=df
+a1 = mean.imp(df1$Monthly.contract.rent)
+d1= is.na(df1$Monthly.contract.rent)
+
+a2 = mean.imp(df1$Householder.s.Age.Recode)
+d2= is.na(df1$Householder.s.Age.Recode)
+
+a3 = mean.imp(df1$White)
+d3= is.na(df1$White)
+
+
+
+reg4 <- lm(df1$Moved ~ a1 + d1 + df1$Income + a2 + d2 + a3 +d3)
+summary(reg4)
+
+```
+
+```{r}
+#LVCF is not applicable 
+```
+
+```{r}
+#hotdecking
+df_hot <- hotdeck(df)
+
+summary(df_hot)
+reg5 <- lm(Moved ~ Monthly.contract.rent + Income + Householder.s.Age.Recode + White, data=df_hot)
+summary(reg5)
+```
+
+summary(df_hot)
+summary(df)
+```{r}
+hist(df$Householder.s.Age.Recode)
+histogram(df_hot$Householder.s.Age.Recode)
+
+hist(df$Monthly.contract.rent)
+histogram(df_hot$Monthly.contract.rent)
+
+hist(df$Moved)
+histogram(df_hot$Moved)
+
+hist(df$White)
+histogram(df_hot$White)
+```
+
+
+```{r}
+#regression imputation
+newdata=df
+
+#for numerical vars
+#age and rent
+fit_age=lm(df$Householder.s.Age.Recode~df$Income, data=df)
+
+fit_rent=lm(df$Monthly.contract.rent~df$Income, data=df)
+
+pred1 = predict(fit_age, newdata = ic(df))
+
+pred2 = predict(fit_rent, newdata = ic(df))
+
+newdata$Householder.s.Age.Recode[is.na(newdata$Householder.s.Age.Recode)] <- pred1[is.na(newdata$Householder.s.Age.Recode)]
+
+newdata$Monthly.contract.rent[is.na(newdata$Monthly.contract.rent)] <- pred2[is.na(newdata$Monthly.contract.rent)]
+
+
+#for binary vars
+#moved
+Ry = as.numeric(!is.na(df$Moved))
+dat.cc = df[Ry == 1, ]
+dat.dropped = df[Ry == 0, ]
+
+mylogit <- glm(df$Moved ~ df$Income, data = df, family = "binomial")
+
+newdata$moved.imp <- predict(mylogit, newdata = dat.dropped, type = "response")
+
+newdata$moved.imp <-round(newdata$moved.imp,0)
+
+newdata$Moved[is.na(newdata$Moved)] <- newdata$moved.imp[is.na(newdata$Moved)]
+
+#white
+Ry = as.numeric(!is.na(df$White))
+dat.cc = df[Ry == 1, ]
+dat.dropped = df[Ry == 0, ]
+
+mylogit2 <- glm(df$White ~ df$Income, data = df, family = "binomial")
+
+newdata$white.imp <- predict(mylogit2, newdata = dat.dropped, type = "response")
+
+newdata$white.imp <-round(newdata$white.imp,0)
+
+newdata$White[is.na(newdata$White)] <- newdata$white.imp[is.na(newdata$White)]
+
+summary(newdata)
+
+reg6 <- lm(Moved ~ Monthly.contract.rent + Income + Householder.s.Age.Recode + White, data=newdata)
+summary(reg6)
+
+```
+
+summary(newdata)
+summary(df)
+```{r}
+hist(df$Householder.s.Age.Recode)
+histogram(newdata$Householder.s.Age.Recode)
+
+hist(df$Monthly.contract.rent)
+histogram(newdata$Monthly.contract.rent)
+
+hist(df$Moved)
+histogram(newdata$Moved)
+
+hist(df$White)
+histogram(newdata$White)
+```
+
+
+
+```{r}
+df_noise=df
+
+#reg imputation w/ noise 
+
+#numerical 
+#age
+Ry = as.numeric(!is.na(df$Householder.s.Age.Recode))
+noise = rnorm(length(pred1),0,summary(fit_age)$sigma)
+df_noise$age.imps = pred1 + noise
+df_noise$Householder.s.Age.Recode[is.na(df_noise$Householder.s.Age.Recode)] <- df_noise$age.imps[is.na(df_noise$Householder.s.Age.Recode)]
+
+#rent
+Ry = as.numeric(!is.na(df$Monthly.contract.rent))
+noise = rnorm(length(pred2),0,summary(fit_rent)$sigma)
+df_noise$rent.imps = pred2 + noise
+df_noise$Monthly.contract.rent[is.na(df_noise$Monthly.contract.rent)] <- df_noise$rent.imps[is.na(df_noise$Monthly.contract.rent)]
+
+#binary
+#moved
+Ry = as.numeric(!is.na(df$Moved))
+df_noise$moved.imp <- predict(mylogit, newdata = dat.dropped, type = "response")
+df_noise$moved.imp[Ry == 0] = rbinom(sum(Ry==0), 1, df_noise$moved.imp)
+df_noise$Moved[is.na(df_noise$Moved)] <- df_noise$moved.imp[is.na(df_noise$Moved)]
+
+#white
+Ry = as.numeric(!is.na(df$White))
+df_noise$white.imp <- predict(mylogit2, newdata = dat.dropped, type = "response")
+df_noise$white.imp[Ry == 0] = rbinom(sum(Ry==0), 1, df_noise$white.imp)
+df_noise$White[is.na(df_noise$White)] <- df_noise$white.imp[is.na(df_noise$White)]
+
+summary(df_noise)
+
+reg7 <- lm(Moved ~ Monthly.contract.rent + Income + Householder.s.Age.Recode + White, data=df_noise)
+summary(reg7)
+
+```
+summary(df_noise)
+```{r}
+histogram(df_noise$Householder.s.Age.Recode)
+```
+
+
+
+```{r}
+#MI 
+mdf = missing_data.frame(df)
+
+```
+
+```{r}
+#summary
+summary(mdf)
+```
+
+```{r}
+#histogram
+hist(mdf)
+
+```
+
+```{r}
+#image
+image(mdf, grayscale=TRUE)
+
+```
+
+```{r}
+#check data types & change
+show(mdf)
+
+```
+
+```{r}
+mdf <- change(mdf, y = "Householder.s.Age.Recode", what = "type", to = "non")
+```
+
+
+```{r}
+#run mi
+imp <- mi(mdf)
+
+```
+
+
+```{r}
+#check convergence 
+converged <- mi2BUGS(imp)
+print(converged)
+plot(converged)
+
+mean_Householder.s.Age.Recode = converged[, , 1]
+
+par(mfrow=c(1,1))
+
+ts.plot(mean_Householder.s.Age.Recode[,1], col=1)
+lines(mean_Householder.s.Age.Recode[,2], col= 2)
+lines(mean_Householder.s.Age.Recode[,3], col= 3)
+lines(mean_Householder.s.Age.Recode[,4], col= 4)
+
+mean_Monthly.contract.rent = converged[, , 2]
+
+par(mfrow=c(1,1))
+
+ts.plot(mean_Monthly.contract.rent[,1], col=1)
+lines(mean_Monthly.contract.rent[,2], col= 2)
+lines(mean_Monthly.contract.rent[,3], col= 3)
+lines(mean_Monthly.contract.rent[,4], col= 4)
+
+
+mean_Moved = converged[, , 3]
+
+par(mfrow=c(1,1))
+
+ts.plot(mean_Moved[,1], col=1)
+lines(mean_Moved[,2], col= 2)
+lines(mean_Moved[,3], col= 3)
+lines(mean_Moved[,4], col= 4)
+
+
+mean_White = converged[, , 4]
+
+par(mfrow=c(1,1))
+
+ts.plot(mean_White[,1], col=1)
+lines(mean_White[,2], col= 2)
+lines(mean_White[,3], col= 3)
+lines(mean_White[,4], col= 4)
+
+
+```
+
+
+
+
+
+```{r}
+#rhats
+#very close to 1!
+Rhats(imp)
+```
+
+```{r}
+#increase # of imputations?- looks good.
+
+```
+
+
+```{r}
+#diagnostics
+plot(imp)
+```
+
+
+```{r}
+#change imputation models ?
+mdfs <- change(mdf, y = "Monthly.contract.rent", what = "imputation_method", to = "pmm")
+mdfs <- change(mdf, y = "Householder.s.Age.Recode", what = "imputation_method", to = "pmm")
+
+imps <- mi(mdfs)
+
+
+
+```
+
+```{r}
+plot(imps)
+```
+
+
+```{r}
+converged <- mi2BUGS(imps)
+print(converged)
+
+mean_Householder.s.Age.Recode = converged[, , 1]
+
+par(mfrow=c(1,1))
+
+ts.plot(mean_Householder.s.Age.Recode[,1], col=1)
+lines(mean_Householder.s.Age.Recode[,2], col= 2)
+lines(mean_Householder.s.Age.Recode[,3], col= 3)
+lines(mean_Householder.s.Age.Recode[,4], col= 4)
+
+mean_Monthly.contract.rent = converged[, , 2]
+
+par(mfrow=c(1,1))
+
+ts.plot(mean_Monthly.contract.rent[,1], col=1)
+lines(mean_Monthly.contract.rent[,2], col= 2)
+lines(mean_Monthly.contract.rent[,3], col= 3)
+lines(mean_Monthly.contract.rent[,4], col= 4)
+
+
+mean_Moved = converged[, , 3]
+
+par(mfrow=c(1,1))
+
+ts.plot(mean_Moved[,1], col=1)
+lines(mean_Moved[,2], col= 2)
+lines(mean_Moved[,3], col= 3)
+lines(mean_Moved[,4], col= 4)
+
+
+mean_White = converged[, , 4]
+
+par(mfrow=c(1,1))
+
+ts.plot(mean_White[,1], col=1)
+lines(mean_White[,2], col= 2)
+lines(mean_White[,3], col= 3)
+lines(mean_White[,4], col= 4)
+```
+
+
+```{r}
+#slightly closer to 1
+Rhats(imps)
+```
+
+
+
+
+
+```{r}
+#run pooled analysis 
+df_pool = mi::pool(Moved ~ Monthly.contract.rent + Income + Householder.s.Age.Recode + White, data=imps)
+display(df_pool)
+summary(df_pool)
+```
+
