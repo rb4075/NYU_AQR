@@ -1,0 +1,524 @@
+---
+title: "2000 census data"
+author: "roberta barnett"
+date: "10/19/2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r}
+library(tidyverse)
+library(GISTools)
+#year 2000
+#source https://s4.ad.brown.edu/Projects/Diversity/Researcher/LTBDDload/DataList.aspx
+#codebook https://s4.ad.brown.edu/Projects/Diversity/Researcher/LTBDDload/Dfiles/codebooks.pdf
+```
+
+```{r}
+# reading in data files 
+## 2000 census data for the whole country
+census2000 <- read.csv("~/GitHub/SpatialProject/data/2000/census2000.csv", sep=",")
+```
+
+```{r}
+# cleaned Brooklyn data 
+LTDB_Std_2000_fullcount <- read.csv("~/GitHub/SpatialProject/data/LTDB_Std_2000_fullcount/LTDB_Std_2000_fullcount.csv")
+
+census2000 <- subset(LTDB_Std_2000_fullcount, LTDB_Std_2000_fullcount$state=="NY")
+census2000 <- subset(LTDB_Std_2000_fullcount, LTDB_Std_2000_fullcount$county=="Kings County")
+census2000. <- subset(census2000, census2000$state=="NY")
+
+names(census2000.)[names(census2000.) == "POP00"] <- "population"
+names(census2000.)[names(census2000.) == "NHWHT00"] <- "white"
+names(census2000.)[names(census2000.) == "NHBLK00"] <- "black"
+names(census2000.)[names(census2000.) == "NTV00"] <- "nativeamerican"
+names(census2000.)[names(census2000.) == "ASIAN00"] <- "asian"
+names(census2000.)[names(census2000.) == "HISP00"] <- "hispanic"
+names(census2000.)[names(census2000.) == "HAW00"] <- "nativehawaiian"
+
+write.csv(census2000., file="census2000.csv")
+
+#shapefile of bk tracts
+library(tigris)
+Bk2000 <- tracts(state = 'NY', county = c('Kings'), year = 2000)
+
+census2000.$ctlabel <- gsub("Census Tract ","",census2000.$tract)
+```
+
+
+
+```{r merging wb 2006 data with 2000 census tract data}
+# reading 2000 census data
+census2000_williamsburg <- read.csv("~/GitHub/SpatialProject/WB subproject/census2000_williamsburg.csv")
+
+# creating ct labels for 2000
+williamsburg_ctlabel2000 <- as.character(census2000_williamsburg$tract)
+williamsburg_ctlabel2000 <- c(williamsburg_ctlabel2000, "515")
+williamsburg_ctlabel2000 <- williamsburg_ctlabel2000[-3]
+
+# subsetting...
+Bk2000@data$ctlabel <- Bk2000@data$NAME00
+nyc_census_wb_2000 <- Bk2000[Bk2000@data$ctlabel %in% williamsburg_ctlabel2000,]
+```
+
+```{r temporary data munging}
+load(file="../../../../OneDrive/Documents/NYU/Fall 2018/Spatial Statistics/Datasets/Stop_Frisk/Stop_Frisk/sqf.RData")
+
+
+stops_2006 <- stops[stops$year == 2006,]
+
+## subsetting based on the bbox of willamsburg precincts
+stops_2006_williamsburg <- stops_2006[stops_2006$lon > nyc_census_wb_2000@bbox[1,1] & stops_2006$lon < nyc_census_wb_2000@bbox[1,2] & stops_2006$lat < nyc_census_wb_2000@bbox[2,2] &
+                                                  stops_2006$lat > nyc_census_wb_2000@bbox[2,1],]
+
+## removing missing lat-lons
+stops_2006_williamsburg <- stops_2006_williamsburg[!is.na(stops_2006_williamsburg$lat) & !is.na(stops_2006_williamsburg$lon),]
+
+stops_2006_williamsburg <- as.data.frame(stops_2006_williamsburg)
+coords <- stops_2006_williamsburg[,c("lon","lat")]
+stops_2006_williamsburg_sp <- SpatialPointsDataFrame(coords=coords,data=stops_2006_williamsburg,
+                                             proj4string=nyc_census_wb_2000@proj4string)
+
+stops_census_merge <- gContains(nyc_census_wb_2000,stops_2006_williamsburg_sp,byid=TRUE)
+
+tracts <- nyc_census_wb_2000$ctlabel
+stops_2006_williamsburg$ctlabel <- NA
+for(i in c(1:dim(stops_census_merge)[2])){
+  stops_2006_williamsburg$ctlabel[stops_census_merge[,i]] <- tracts[i]
+}
+
+stops_subset <- stops_2006_williamsburg[!is.na(stops_2006_williamsburg$ctlabel),]
+coords <- stops_subset[,c("lon","lat")]
+stops_subset_sp <- SpatialPointsDataFrame(coords=coords,data=stops_subset,
+                                             proj4string=nyc_census_wb_2000@proj4string)
+
+# plotting
+plot(nyc_census_wb_2000)
+with(stops_subset, points(lon, lat, pch = ".", col = stops_subset$suspect.race))
+
+```
+
+
+
+```{r}
+stops_subset$suspect.race <- stops_subset$suspect.race%>%fct_collapse(hispanic = c("black hispanic","white hispanic"))
+
+stops_frisks_by_race <- stops_subset %>% group_by(ctlabel,suspect.race) %>% summarise(stops=n(),frisks=sum(frisked))
+
+colnames(stops_frisks_by_race)[2] <- "group"
+
+stops_frisks_total <- stops_subset %>% group_by(ctlabel) %>% summarise(stops=n(),frisks=sum(frisked))
+stops_frisks_total$group <- "total"
+
+stops_frisks_total <- stops_frisks_total[,c(1,4,2,3)]
+
+stops_frisks_by_race <- rbind(as.data.frame(stops_frisks_by_race),as.data.frame(stops_frisks_total))
+
+head(stops_frisks_by_race)
+
+length(unique(stops_frisks_by_race$ctlabel))
+```
+
+
+```{r}
+head(census2000.)
+# names(census2000.NY)
+
+census2000. <- census2000.[,c("population","white","black","nativeamerican","asian","hispanic","nativehawaiian","ctlabel")]
+
+```
+
+
+
+```{r}
+stop_frisk_rates <- merge(stops_frisks_by_race,census2000.,by="ctlabel")
+head(stop_frisk_rates)
+
+stop_frisk_rates_total
+
+
+length(unique(stop_frisk_rates$ctlabel))
+```
+
+```{r}
+stop_frisk_rates <- stop_frisk_rates %>% mutate(stop_rate=case_when(
+  group == "total" ~ stops*1000/population,
+  group == "white" ~ stops*1000/white,
+  group == "black" ~ stops*1000/black,
+  group == "asian" ~ stops*1000/asian,
+  group == "hispanic" ~ stops*1000/hispanic),frisk_rate = case_when(
+  group == "total" ~ frisks*1000/population,
+  group == "white" ~ frisks*1000/white,
+  group == "black" ~ frisks*1000/black,
+  group == "asian" ~ frisks*1000/asian,
+  group == "hispanic" ~ frisks*1000/hispanic))
+```
+
+
+
+```{r}
+stop_frisk_rates_total <- stop_frisk_rates[stop_frisk_rates$group == "total",]
+choropleth(nyc_census_wb_2000,stop_frisk_rates_total[match(nyc_census_wb_2000$ctlabel,stop_frisk_rates_total$ctlabel),"frisk_rate"],main="Frisk Rate in 2006")
+```
+```{r}
+wb06.nb <- poly2nb(nyc_census_wb_2000, queen=TRUE)
+wb06.lw <- nb2listw(wb06.nb)
+geary.mc(stop_frisk_rates_total$frisk_rate,wb06.lw,nsim=999) 
+```
+```{r}
+wb06.nb <- poly2nb(nyc_census_wb_2000, queen=FALSE)
+wb06.lw <- nb2listw(wb06.nb)
+geary.mc(stop_frisk_rates_total$frisk_rate,wb06.lw,nsim=999) 
+```
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total$frisk_rate, wb06.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_wb_2000,moran.loc[,"Pr(z > 0)"],shades)
+```
+
+```{r}
+moran.plot(stop_frisk_rates_total$frisk_rate, wb06.lw)
+```
+
+
+```{r}
+stop_frisk_rates_total <- stop_frisk_rates[stop_frisk_rates$group == "total",]
+choropleth(nyc_census_wb_2000,stop_frisk_rates_total[match(nyc_census_wb_2000$ctlabel,stop_frisk_rates_total$ctlabel),"stop_rate"],main="Stop Rate in 2006")
+```
+
+```{r}
+wb06.nb <- poly2nb(nyc_census_wb_2000, queen=TRUE)
+wb06.lw <- nb2listw(wb06.nb)
+geary.mc(stop_frisk_rates_total$stop_rate,wb06.lw,nsim=999) 
+```
+
+
+
+```{r}
+wb06.nb <- poly2nb(nyc_census_wb_2000, queen=FALSE)
+wb06.lw <- nb2listw(wb06.nb)
+geary.mc(stop_frisk_rates_total$stop_rate,wb06.lw,nsim=999) 
+```
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total$stop_rate, wb06.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_wb_2000,moran.loc[,"Pr(z > 0)"],shades)
+```
+
+```{r}
+moran.plot(stop_frisk_rates_total$stop_rate, wb06.lw)
+```
+
+```{r loading files needed}
+# shapefile
+nyc_census_tracts <- readOGR("../data/2010 Census Tracts/geo_export_efe53346-3b34-4624-afa5-3012c025c024.shp")
+nyc_census_tracts@data$ctlabel <- as.character(nyc_census_tracts@data$ctlabel)
+
+# generating census tract labels
+willamsburg_ctlabel <- censustrack2010.bk$ctlabel
+willamsburg_ctlabel <- as.character(willamsburg_ctlabel)
+
+# williamsburg shapefile
+nyc_census_williamsburg <- nyc_census_tracts[nyc_census_tracts@data$ctlabel %in% willamsburg_ctlabel,]
+
+
+# cleaning- getting rid of the accidental Bronx tract
+nyc_census_williamsburg <- nyc_census_williamsburg[nyc_census_williamsburg$boro_name != "Bronx",]
+
+nyc_census_williamsburg <- nyc_census_williamsburg[nyc_census_williamsburg$boro_name != "Queens",]
+
+# wb subset for of stop frisk data (williamsburg_stops)
+load(file.choose())
+
+## subsettign only 2011
+wb_stops_2011 <- williamsburg_stops[williamsburg_stops$year==2011,]
+
+##subset for cts
+wb_stops_2011 <- wb_stops_2011[]
+wb_stops_2011 <- wb_stops_2011[wb_stops_2011$boro_ct201 %in% boro_ct_2011$V1,]
+
+# 2010 census data (censustrack2010), will subset later
+#load("~/GitHub/SpatialProject/data/cleaned_census_data.RData")
+load(file.choose())
+```
+
+```{r some plots}
+plot(nyc_census_williamsburg)
+with(wb_stops_2011, points(lon, lat, pch = ".", col = wb_stops_2011$suspect.race))
+legend("bottomleft", levels(wb_stops_2011$suspect.race), 
+       fill = wb_stops_2011$suspect.race,
+       bty = "n",
+       cex = .6)
+```
+
+
+
+```{r generating choropleth for 2010}
+stops_subset_2011 <- wb_stops_2011
+
+stops_subset_2011$suspect.race <- stops_subset_2011$suspect.race%>%fct_collapse(hispanic = c("black hispanic","white hispanic"))
+
+stops_frisks_by_race.2011 <- stops_subset_2011 %>% group_by(boro_ct201,suspect.race) %>% summarise(stops=n(),frisks=sum(frisked))
+
+colnames(stops_frisks_by_race.2011)[2] <- "group"
+
+stops_frisks_total.2011 <- stops_subset_2011 %>% group_by(boro_ct201) %>% summarise(stops=n(),frisks=sum(frisked))
+stops_frisks_total.2011$group <- "total"
+
+stops_frisks_total.2011 <- stops_frisks_total.2011[,c(1,4,2,3)]
+
+stops_frisks_by_race.2011 <- rbind(as.data.frame(stops_frisks_by_race.2011),as.data.frame(stops_frisks_total.2011))
+
+head(stops_frisks_by_race.2011)
+
+length(unique(stops_frisks_by_race.2011$boro_ct201))
+```
+
+```{r}
+censustrack2010.bk <- censustrack2010
+censustrack2010.bk <- censustrack2010.bk[censustrack2010.bk$borough=="Brooklyn",]
+censustrack2010.bk$censustract <- as.character(censustrack2010.bk$censustract)
+
+# trimming and renaming to conform with 2000 census var names
+censustrack2010.bk <- censustrack2010.bk[,-c(1:3)]
+censustrack2010.bk$ctlabel <- as.character(as.numeric(censustrack2010.bk$censustract)/100)
+
+# subsetting
+williamsburg_ctlabel.2011 <- c(449, 561, 527, 509, 553, 551, 539, 547, 531, 285.01, 481, 495, 499, 503, 505, 517, 533,569, 591, 593, 529, 511, 537, 545, 501, 515, 523, 525, 453, 485, 489, 493, 535, 477, 497, 543, 589, 555, 389, 491, 507,519, 557, 513, 549)
+
+censustrack2010.bk <- censustrack2010.bk[censustrack2010.bk$ctlabel %in% williamsburg_ctlabel.2011,]
+
+
+
+# trimming and renaming again
+censustrack2010.bk <- censustrack2010.bk[,-c(1)]
+names(censustrack2010.bk)[1] <- "population"
+names(censustrack2010.bk)[4] <- "nativeamerican"
+censustrack2010.bk <- censustrack2010.bk[,c("population", "white", "black", 
+                                            "nativeamerican", "asian", "hispanic",
+                                            "nativehawaiian", "ctlabel")]
+```
+
+
+```{r}
+#stop_frisk_rates.2011 <- merge(censustrack2010.bk,stops_frisks_total.2011,by.x="ctlabel", by.y="ctlabel")
+
+stop_frisk_rates.2011 <- cbind(censustrack2010.bk, stops_frisks_total.2011)
+
+
+head(stop_frisk_rates.2011)
+```
+
+```{r}
+stop_frisk_rates.2011 <- stop_frisk_rates.2011 %>% mutate(stop_rate=case_when(
+  group == "total" ~ stops*1000/population,
+  group == "white" ~ stops*1000/white,
+  group == "black" ~ stops*1000/black,
+  group == "asian" ~ stops*1000/asian,
+  group == "hispanic" ~ stops*1000/hispanic),frisk_rate = case_when(
+  group == "total" ~ frisks*1000/population,
+  group == "white" ~ frisks*1000/white,
+  group == "black" ~ frisks*1000/black,
+  group == "asian" ~ frisks*1000/asian,
+  group == "hispanic" ~ frisks*1000/hispanic))
+```
+
+```{r}
+stop_frisk_rates_total.2011 <- stop_frisk_rates.2011[stop_frisk_rates.2011$group == "total",]
+stop_frisk_rates_total.2011[!is.na(stop_frisk_rates_total.2011$ctlabel),]
+
+choropleth(nyc_census_williamsburg,stop_frisk_rates_total.2011[match(nyc_census_williamsburg$ctlabel,stop_frisk_rates_total.2011$ctlabel),"frisk_rate"],main="Frisk Rate in 2011")
+```
+
+```{r}
+#geary's c
+wb11.nb <- poly2nb(nyc_census_williamsburg, queen=TRUE)
+wb11.lw <- nb2listw(wb11.nb)
+geary.mc(stop_frisk_rates_total.2011$frisk_rate,wb11.lw,nsim=999) 
+```
+```{r}
+#geary's c
+wb11.nb <- poly2nb(nyc_census_williamsburg, queen=FALSE)
+wb11.lw <- nb2listw(wb11.nb)
+geary.mc(stop_frisk_rates_total.2011$frisk_rate,wb11.lw,nsim=999) 
+```
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total.2011$frisk_rate, wb11.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_williamsburg,moran.loc[,"Pr(z > 0)"],shades)
+```
+```{r}
+moran.plot(stop_frisk_rates_total.2011$frisk_rate, wb11.lw)
+```
+
+
+```{r}
+stop_frisk_rates_total.2011 <- stop_frisk_rates.2011[stop_frisk_rates.2011$group == "total",]
+#stop_frisk_rates_total.2011[!is.na(stop_frisk_rates_total.2011$ctlabel),]
+
+choropleth(nyc_census_williamsburg,stop_frisk_rates_total.2011[match(nyc_census_williamsburg$ctlabel,stop_frisk_rates_total.2011$ctlabel),"stop_rate"],main="Stop Rate in 2011")
+```
+
+```{r}
+#geary's c
+wb11.nb <- poly2nb(nyc_census_williamsburg, queen=TRUE)
+wb11.lw <- nb2listw(wb11.nb)
+geary.mc(stop_frisk_rates_total.2011$stop_rate,wb11.lw,nsim=999) 
+```
+
+```{r}
+#geary's c
+wb11.nb <- poly2nb(nyc_census_williamsburg, queen=FALSE)
+wb11.lw <- nb2listw(wb11.nb)
+geary.mc(stop_frisk_rates_total.2011$stop_rate,wb11.lw,nsim=999) 
+```
+
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total.2011$stop_rate, wb11.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_williamsburg,moran.loc[,"Pr(z > 0)"],shades)
+```
+
+```{r}
+moran.plot(stop_frisk_rates_total.2011$stop_rate, wb11.lw)
+```
+#agg by race
+#2006
+stop_frisk_rates_total$blackrate <- 1000 * stop_frisk_rates_total$black/stop_frisk_rates_total$stops
+
+stop_frisk_rates_total$whiterate <- 1000 * stop_frisk_rates_total$white/stop_frisk_rates_total$stops
+
+stop_frisk_rates_total$hisprate <- 1000 * stop_frisk_rates_total$hispanic/stop_frisk_rates_total$stops
+
+#2011
+
+stop_frisk_rates_total.2011$blackrate <- 1000 * stop_frisk_rates_total.2011$black/stop_frisk_rates_total.2011$stops
+
+stop_frisk_rates_total.2011$whiterate <- 1000 * stop_frisk_rates_total.2011$white/stop_frisk_rates_total.2011$stops
+
+stop_frisk_rates_total.2011$hisprate <- 1000 * stop_frisk_rates_total.2011$hispanic/stop_frisk_rates_total.2011$stops
+
+
+##blacks 
+
+
+```{r}
+choropleth(nyc_census_wb_2000,stop_frisk_rates_total[match(nyc_census_wb_2000$ctlabel,stop_frisk_rates_total$ctlabel),"blackrate"],main="Stop Rate in 2006 (Blacks)")
+```
+```{r}
+#geary's c
+geary.mc(stop_frisk_rates_total$black,wb06.lw,nsim=999) 
+```
+
+```{r}
+choropleth(nyc_census_williamsburg,stop_frisk_rates_total.2011[match(nyc_census_williamsburg$ctlabel,stop_frisk_rates_total.2011$ctlabel),"blackrate"],main="Stop Rate in 2011 (Blacks)")
+```
+
+```{r}
+#geary's c
+wb11.nb <- poly2nb(nyc_census_williamsburg, queen=TRUE)
+wb11.lw <- nb2listw(wb11.nb)
+geary.mc(stop_frisk_rates_total.2011$blackrate,wb11.lw,nsim=999) 
+```
+##hispanics 
+
+```{r}
+choropleth(nyc_census_wb_2000,stop_frisk_rates_total[match(nyc_census_wb_2000$ctlabel,stop_frisk_rates_total$ctlabel),"hisprate"],main="Stop Rate in 2006 (Hispanics)")
+```
+```{r}
+#geary's c
+geary.mc(stop_frisk_rates_total$hispanic,wb06.lw,nsim=999) 
+```
+
+
+
+```{r}
+choropleth(nyc_census_williamsburg,stop_frisk_rates_total.2011[match(nyc_census_williamsburg$ctlabel,stop_frisk_rates_total.2011$ctlabel),"hisprate"],main="Stop Rate in 2011 (Hispanics)")
+```
+
+```{r}
+#geary's c
+geary.mc(stop_frisk_rates_total.2011$hispanic,wb11.lw,nsim=999) 
+```
+
+##whites
+
+```{r}
+choropleth(nyc_census_wb_2000,stop_frisk_rates_total[match(nyc_census_wb_2000$ctlabel,stop_frisk_rates_total$ctlabel),"whiterate"],main="Stop Rate in 2006 (Whites)")
+```
+```{r}
+#geary's c
+geary.mc(stop_frisk_rates_total$white,wb06.lw,nsim=999) 
+```
+
+```{r}
+choropleth(nyc_census_williamsburg,stop_frisk_rates_total.2011[match(nyc_census_williamsburg$ctlabel,stop_frisk_rates_total.2011$ctlabel),"white"],main="Stop Rate in 2011 (Whites)")
+```
+
+```{r}
+#geary's c
+geary.mc(stop_frisk_rates_total.2011$white,wb11.lw,nsim=999) 
+```
+
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total$blackrate, wb06.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_wb_2000,moran.loc[,"Pr(z > 0)"],shades)
+```
+
+
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total$whiterate, wb06.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_wb_2000,moran.loc[,"Pr(z > 0)"],shades)
+```
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total$hisprate, wb06.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_wb_2000,moran.loc[,"Pr(z > 0)"],shades)
+```
+
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total.2011$whiterate, wb11.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_williamsburg,moran.loc[,"Pr(z > 0)"],shades)
+```
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total.2011$hisprate, wb11.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_williamsburg,moran.loc[,"Pr(z > 0)"],shades)
+```
+
+```{r}
+#localmoran
+moran.loc <- localmoran(stop_frisk_rates_total.2011$blackrate, wb11.lw, p.adjust.method = "fdr")
+shades <- shading(c(0.5),cols=c(2,8))
+choropleth(nyc_census_williamsburg,moran.loc[,"Pr(z > 0)"],shades)
+```
+
+#mean stop and frisk rates
+
+mean(stop_frisk_rates_total$stops)
+
+mean(stop_frisk_rates_total$blackrate)
+
+mean(stop_frisk_rates_total$whiterate) 
+
+mean(stop_frisk_rates_total$hisprate) 
+
+mean(stop_frisk_rates_total.2011$stops)
+
+mean(stop_frisk_rates_total.2011$blackrate) 
+
+mean(stop_frisk_rates_total.2011$whiterate)
+
+mean(stop_frisk_rates_total.2011$hisprate)
